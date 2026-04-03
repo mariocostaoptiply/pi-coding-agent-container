@@ -83,7 +83,7 @@ make clean
       "apiKey": "none",
       "models": [
         {
-          "id": "GLM-4.7-Flash"
+          "id": "gemma-4-26B-A4B-it-GGUF"
         }
       ]
     }
@@ -97,7 +97,7 @@ make clean
 {
   "lastChangelogVersion": "0.52.7",
   "defaultProvider": "llama-cpp",
-  "defaultModel": "GLM-4.7-Flash",
+  "defaultModel": "gemma-4-26B-A4B-it-GGUF",
   "autocompleteMaxVisible": 7,
   "defaultThinkingLevel": "off"
 }
