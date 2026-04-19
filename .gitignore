@@ -2,3 +2,5 @@
 workspace
 .env
 experiments
+dev
+github_token.txt

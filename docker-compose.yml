@@ -10,25 +10,38 @@ services:
     stdin_open: true
 
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - PARANOID_MODE=${PARANOID_MODE:-true}
       - GIT_AUTHOR_NAME=${GIT_NAME}
       - GIT_AUTHOR_EMAIL=${GIT_EMAIL}
       - GIT_COMMITTER_NAME=${GIT_NAME}
       - GIT_COMMITTER_EMAIL=${GIT_EMAIL}
-
-      # GPG config
       - GIT_CONFIG_COUNT=2
       - GIT_CONFIG_KEY_0=user.signingkey
       - GIT_CONFIG_VALUE_0=${GIT_GPG_KEY}
       - GIT_CONFIG_KEY_1=commit.gpgsign
       - GIT_CONFIG_VALUE_1=${GIT_GPG_SIGN:-false}
 
+    secrets:
+      - source: github_token
+        target: ${SECRET_TARGET_PATH:-/run/secrets/gh_default}
+
     volumes:
       - workspace:/workspace
       - pi_data:/home/node/.pi
       
-    user: "${UID:-1000}:${GID:-1000}"
-    
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:noexec,nodev,nosuid,mode=1777
+      - /home/node/.config:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=700,noexec,nodev,nosuid
+      - /home/node/.npm:uid=${HOST_UID:-1000},gid=${HOST_GID:-1000},mode=700,noexec,nodev,nosuid
+
+    pids_limit: 150
+
     networks:
       - pi_network
 
@@ -52,3 +65,7 @@ volumes:
 networks:
   pi_network:
     driver: bridge
+
+secrets:
+  github_token:
+    file: ${PWD}/.secrets/github_token.txt

@@ -2,17 +2,10 @@
 
 FROM node:22-bookworm-slim AS base
 
-# Set environment variables for production and non-interactive installation
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NPM_CONFIG_LOGLEVEL=warn
 
-# Install essential system tools required by pi-coding-agent and common dev workflows
-# - git: Required for 'pi install git:...' and version control operations
-# - curl/wget: For downloading external resources
-# - procps: For process monitoring
-# - build-essential: For compiling native add-ons (if extensions require them)
-# - ca-certificates: Ensure SSL connections work securely
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -21,11 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     build-essential \
     python3 \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-# Install GitHub CLI (gh)
+# System Hardening: Purge Privilege Escalation Vectors
 # -----------------------------------------------------------------------------
+RUN rm -f /bin/su /usr/bin/su /bin/mount /usr/bin/mount /bin/umount /usr/bin/umount \
+    /usr/bin/passwd /usr/bin/chsh /usr/bin/chfn /usr/bin/chage /usr/bin/gpasswd \
+    /usr/bin/newgrp /bin/login /usr/bin/login /usr/bin/nsenter /usr/bin/unshare \
+    /usr/bin/setpriv /bin/setpriv \
+    && find / -xdev \( -perm -4000 -o -perm -2000 \) -type f -exec chmod a-s {} + || true
+
 RUN mkdir -p -m 755 /etc/apt/keyrings \
     && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -34,28 +34,54 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# -----------------------------------------------------------------------------
+# The GitHub CLI Guardrail & Vault
+# -----------------------------------------------------------------------------
+COPY src/gh-guard.sh /usr/local/bin/gh-guard
+RUN chmod +x /usr/local/bin/gh-guard
+
+COPY src/gh-vault.c /tmp/gh-vault.c
+RUN gcc -O2 /tmp/gh-vault.c -o /usr/local/bin/gh \
+    && chown root:root /usr/local/bin/gh \
+    && chmod 4755 /usr/local/bin/gh \
+    && rm /tmp/gh-vault.c
+
+# -----------------------------------------------------------------------------
+# The Global Syscall Firewall (LD_PRELOAD) - Blocks Child Processes
+# -----------------------------------------------------------------------------
+COPY src/fs-vault.c /tmp/fs-vault.c
+RUN gcc -shared -fPIC -O2 /tmp/fs-vault.c -o /usr/local/lib/fs-vault.so -ldl \
+    && rm /tmp/fs-vault.c \
+    && echo "/usr/local/lib/fs-vault.so" > /etc/ld.so.preload
+
+# -----------------------------------------------------------------------------
+# Comprehensive Application-Layer Firewall (V8 Hook)
+# -----------------------------------------------------------------------------
+COPY src/app-firewall.js /usr/local/lib/app-firewall.js
+
+# Force Node.js to load the firewall before initializing the agent
+ENV NODE_OPTIONS="--require /usr/local/lib/app-firewall.js"
+
 FROM base AS release
 
-# Install the pi-coding-agent globally
-# We verify the registry connection implicitly during install
 RUN npm install -g @mariozechner/pi-coding-agent
 
-# Create a non-root user setup
-# We use the existing 'node' user (UID 1000) provided by the base image
-# Create the .pi directory structure to ensure permissions are correct when mounted
-RUN mkdir -p /home/node/.pi/agent && \
-    mkdir -p /workspace && \
-    chown -R node:node /home/node/.pi && \
-    chown -R node:node /workspace
+RUN mkdir -p /home/node/.pi/agent \
+    /workspace \
+    /home/node/.config \
+    /home/node/.npm && \
+    chown -R node:node /home/node/.pi \
+    /workspace \
+    /home/node/.config \
+    /home/node/.npm
 
-# Set the working directory to the project workspace
 WORKDIR /workspace
 
-# Switch to non-root user for security
 USER node
 
-# Verify installation
-RUN pi --version
+# Force Git to use the secure CLI as its credential helper.
+RUN git config --global credential.https://github.com.helper "" && \
+    git config --global credential.https://github.com.helper "!/usr/bin/gh auth git-credential"
 
 ENTRYPOINT ["pi"]
 CMD []
