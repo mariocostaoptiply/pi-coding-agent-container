@@ -25,10 +25,6 @@ services:
     secrets:
       - source: github_token
         target: ${SECRET_TARGET_PATH:-/run/secrets/gh_default}
-        # KERNEL-LEVEL ENFORCEMENT: 
-        # Prevents any static binary running as user 'node' from accessing the token directly.
-        # Only the SUID root /usr/local/bin/gh binary can read this.
-        mode: 0400
 
     volumes:
       - workspace:/workspace

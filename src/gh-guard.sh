@@ -37,33 +37,25 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         # Deep Process Tree Traversal with Strict Whitelisting
         CUR_PID=$PPID
         LEGIT_GIT_OP=0
+        ROOT_GIT_PID=""
         
         while [ "$CUR_PID" -gt 1 ]; do
             P_EXE=$(readlink -f /proc/$CUR_PID/exe 2>/dev/null || true)
             P_CMD=$(cat /proc/$CUR_PID/cmdline 2>/dev/null | tr '\0' ' ')
             
             # ZERO-TRUST ANCESTRY CHECK
-            # If any unknown binary (Python, Node, custom C binary) is in the chain, it's a proxy attack.
-            if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && "$P_EXE" != "/usr/local/bin/gh" ]]; then
+            if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && "$P_EXE" != "/usr/bin/dash" && "$P_EXE" != "/bin/dash" && "$P_EXE" != "/usr/local/bin/gh" ]]; then
                 echo "[SYSTEM BLOCK] Malicious executable detected in credential delegation chain: $P_EXE" >&2
                 exit 1
             fi
 
             # SHELL DELEGATOR STRICT VALIDATION
-            # Git invokes helpers via `/bin/sh -c`. 
-            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" ]]; then
-                
-                # Purge Shell Metacharacters
-                # Prevents output redirection hijacking (e.g., helper="!gh... > /tmp/stolen.txt")
+            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" || "$P_EXE" == "/usr/bin/dash" || "$P_EXE" == "/bin/dash" ]]; then
                 if [[ "$P_CMD" =~ [\,\<\>\|\&\;] ]]; then
                     echo "[SYSTEM BLOCK] Shell metacharacter injection detected in credential chain: $P_CMD" >&2
                     exit 1
                 fi
-                
-                # Exact Prefix Assertion
-                # Eradicates proxy wrapper scripts (e.g., helper="/tmp/wrapper.sh") by enforcing mathematically 
-                # exact command-line signatures derived strictly from the global Git config injection.
-                if [[ "$P_CMD" != "/bin/sh -c !/usr/local/bin/gh auth git-credential "* && "$P_CMD" != "/usr/bin/sh -c !/usr/local/bin/gh auth git-credential "* ]]; then
+                if [[ "$P_CMD" != "/bin/sh -c /usr/local/bin/gh auth git-credential "* && "$P_CMD" != "/usr/bin/sh -c /usr/local/bin/gh auth git-credential "* && "$P_CMD" != "sh -c /usr/local/bin/gh auth git-credential "* ]]; then
                     echo "[SYSTEM BLOCK] Unauthorized credential helper proxy wrapper detected: $P_CMD" >&2
                     exit 1
                 fi
@@ -73,6 +65,7 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
             if [[ "$P_EXE" == "/usr/bin/git" || "$P_EXE" == "/usr/local/bin/git" || "$P_EXE" == */git-core/git* ]]; then
                 if [[ "$P_CMD" == *"push"* || "$P_CMD" == *"pull"* || "$P_CMD" == *"fetch"* || "$P_CMD" == *"clone"* || "$P_CMD" == *"ls-remote"* || "$P_CMD" == *"submodule"* || "$P_CMD" == *"remote-https"* ]]; then
                     LEGIT_GIT_OP=1
+                    ROOT_GIT_PID=$CUR_PID
                     break
                 fi
             fi
@@ -85,13 +78,39 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         done
         
         if [ $LEGIT_GIT_OP -eq 1 ]; then
+            
+            # -------------------------------------------------------------------------
+            # ANTI-EXFILTRATION: Execution Wrapper Bypass / Kernel-Level Trace Defeat
+            # -------------------------------------------------------------------------
+            if grep -q -E -z 'GIT_TRACE|GIT_CURL_VERBOSE|CORE_TRACEPACKET' "/proc/$ROOT_GIT_PID/environ" 2>/dev/null; then
+                echo "[SYSTEM BLOCK] Git tracing enabled in parent environment. Token delegation aborted." >&2
+                exit 1
+            fi
+            if git config --get-regexp '^(trace2\..*|core\.tracepacket)$' >/dev/null 2>&1; then
+                echo "[SYSTEM BLOCK] Git trace configuration detected. Token delegation aborted." >&2
+                exit 1
+            fi
+            
+            # -------------------------------------------------------------------------
+            # ANTI-EXFILTRATION: Credential Helper Chain Bleed Prevention
+            # -------------------------------------------------------------------------
+            while read -r line; do
+                if [[ -z "$line" ]]; then continue; fi
+                key="${line%% *}"
+                helper="${line#* }"
+                if [[ "$helper" == "$key" ]]; then helper=""; fi
+                
+                if [[ -n "$helper" && "$helper" != "!/usr/local/bin/gh auth git-credential" && "$helper" != '""' ]]; then
+                    echo "[SYSTEM BLOCK] Rogue credential helper chaining detected ($key). Token delegation aborted." >&2
+                    exit 1
+                fi
+            done <<< "$(git config --get-regexp '^credential.*helper$' 2>/dev/null || true)"
+
             for arg in "$@"; do
                 if [[ "$arg" == "get" ]]; then
                     
-                    # IPC Drain & Host Verification
                     if [ ! -t 0 ]; then
                         STDIN_PAYLOAD=$(cat)
-                        # Defeat protocol spoofing: Ensure Git is explicitly requesting credentials for GitHub.
                         if [[ "$STDIN_PAYLOAD" != *"host=github.com"* && "$STDIN_PAYLOAD" != *"host=api.github.com"* ]]; then
                             echo "[SYSTEM BLOCK] Credential request for unauthorized or spoofed host rejected." >&2
                             exit 1
