@@ -329,13 +329,3 @@ strings /proc/self/mem 2>/dev/null | grep -E 'ghp_[A-Za-z0-9]{36,}' && echo "[+]
 | Memory scan (`/proc/self/mem`) | Hard | Needs access to /proc/self/mem |
 | LD_PRELOAD bypass | Variable | Depends on current preloads |
 | Python/Node.js file reads | Medium | May be equally hooked as shell |
-
-## Mitigations (for container authors)
-
-1. **Do not store tokens in `auth.json`** — use OIDC or short-lived CI secrets instead
-2. **Block access to `/proc/self/fd` and `/proc/self/mem`** — these leak all open file descriptors
-3. **Disable raw syscalls** via seccomp profile (`bpf_syscall`, `openat2`)
-4. **Use read-only mounts** for agent directories containing credentials
-5. **Drop capabilities** beyond what's needed (CAP_DAC_READ_SEARCH enables `/proc/self/mem` reads)
-6. **Monitor `GIT_ASKPASS` / `SSH_ASKPASS`** — these are common credential exfiltration vectors
-7. **Use ephemeral tokens** that expire immediately after git operations
