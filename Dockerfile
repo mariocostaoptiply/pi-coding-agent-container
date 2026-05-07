@@ -75,6 +75,16 @@ RUN mkdir -p /home/node/.pi/agent \
     /home/node/.config \
     /home/node/.npm
 
+# -----------------------------------------------------------------------------
+# Kernel-Level DAC Enforcement against Static Binaries
+# Pre-emptively create sensitive config files with Root ownership and 000 permissions.
+# Bypasses LD_PRELOAD limitations by utilizing the OS Kernel for access denial.
+# -----------------------------------------------------------------------------
+RUN mkdir -p /home/node/.pi/agent && \
+    echo '{"locked": true}' > /home/node/.pi/agent/auth.json && \
+    chown root:root /home/node/.pi/agent/auth.json && \
+    chmod 000 /home/node/.pi/agent/auth.json
+
 WORKDIR /workspace
 
 USER node
@@ -96,7 +106,6 @@ exec /usr/bin/git "$@"' > /usr/local/bin/git \
 USER node
 
 # Force Git to use the secure CLI as its credential helper.
-# Target the wrapper `/usr/local/bin/gh` to invoke the `gh-vault` C binary.
 RUN git config --global credential.https://github.com.helper "" && \
     git config --global credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential"
 

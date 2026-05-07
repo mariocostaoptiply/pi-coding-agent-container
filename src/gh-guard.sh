@@ -34,9 +34,7 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
     # ZERO-TRUST EXCEPTION: Only allow credential helper if a legitimate background Git operation is occurring.
     if [[ "$COMMAND" == "auth" && "$SUBCOMMAND" == "git-credential" ]]; then
         
-        # Deep Process Tree Traversal
-        # We traverse upward indefinitely to locate the true root Git command,
-        # bypassing proxy sub-shells and git's internal credential sub-processes.
+        # Deep Process Tree Traversal with Strict Whitelisting
         CUR_PID=$PPID
         LEGIT_GIT_OP=0
         
@@ -44,16 +42,41 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
             P_EXE=$(readlink -f /proc/$CUR_PID/exe 2>/dev/null || true)
             P_CMD=$(cat /proc/$CUR_PID/cmdline 2>/dev/null | tr '\0' ' ')
             
-            # Account for various Debian/Linux git binary locations and wrappers
+            # ZERO-TRUST ANCESTRY CHECK
+            # If any unknown binary (Python, Node, custom C binary) is in the chain, it's a proxy attack.
+            if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && "$P_EXE" != "/usr/local/bin/gh" ]]; then
+                echo "[SYSTEM BLOCK] Malicious executable detected in credential delegation chain: $P_EXE" >&2
+                exit 1
+            fi
+
+            # SHELL DELEGATOR STRICT VALIDATION
+            # Git invokes helpers via `/bin/sh -c`. 
+            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" ]]; then
+                
+                # Purge Shell Metacharacters
+                # Prevents output redirection hijacking (e.g., helper="!gh... > /tmp/stolen.txt")
+                if [[ "$P_CMD" =~ [\,\<\>\|\&\;] ]]; then
+                    echo "[SYSTEM BLOCK] Shell metacharacter injection detected in credential chain: $P_CMD" >&2
+                    exit 1
+                fi
+                
+                # Exact Prefix Assertion
+                # Eradicates proxy wrapper scripts (e.g., helper="/tmp/wrapper.sh") by enforcing mathematically 
+                # exact command-line signatures derived strictly from the global Git config injection.
+                if [[ "$P_CMD" != "/bin/sh -c !/usr/local/bin/gh auth git-credential "* && "$P_CMD" != "/usr/bin/sh -c !/usr/local/bin/gh auth git-credential "* ]]; then
+                    echo "[SYSTEM BLOCK] Unauthorized credential helper proxy wrapper detected: $P_CMD" >&2
+                    exit 1
+                fi
+            fi
+            
+            # ROOT GIT OPERATION VALIDATION
             if [[ "$P_EXE" == "/usr/bin/git" || "$P_EXE" == "/usr/local/bin/git" || "$P_EXE" == */git-core/git* ]]; then
-                # Identify if the orchestrating parent is a high-level network operation
                 if [[ "$P_CMD" == *"push"* || "$P_CMD" == *"pull"* || "$P_CMD" == *"fetch"* || "$P_CMD" == *"clone"* || "$P_CMD" == *"ls-remote"* || "$P_CMD" == *"submodule"* || "$P_CMD" == *"remote-https"* ]]; then
                     LEGIT_GIT_OP=1
                     break
                 fi
             fi
             
-            # Robust, bash-native extraction of PPID to prevent awk dependency issues
             NEXT_PID=$(grep -s '^PPid:' "/proc/$CUR_PID/status" | tr -dc '0-9' || echo 0)
             if [ -z "$NEXT_PID" ] || [ "$NEXT_PID" -eq "$CUR_PID" ] || [ "$NEXT_PID" -eq 0 ]; then
                 break
@@ -62,14 +85,17 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         done
         
         if [ $LEGIT_GIT_OP -eq 1 ]; then
-            # Direct Credential Fulfillment:
-            # Bypass the native `gh` CLI which relies on stateful config files (hosts.yml).
             for arg in "$@"; do
                 if [[ "$arg" == "get" ]]; then
                     
-                    # IPC Drain: Consume Git's STDIN payload entirely to prevent SIGPIPE crashing the Git parent process.
+                    # IPC Drain & Host Verification
                     if [ ! -t 0 ]; then
-                        cat > /dev/null
+                        STDIN_PAYLOAD=$(cat)
+                        # Defeat protocol spoofing: Ensure Git is explicitly requesting credentials for GitHub.
+                        if [[ "$STDIN_PAYLOAD" != *"host=github.com"* && "$STDIN_PAYLOAD" != *"host=api.github.com"* ]]; then
+                            echo "[SYSTEM BLOCK] Credential request for unauthorized or spoofed host rejected." >&2
+                            exit 1
+                        fi
                     fi
 
                     if [ -n "$GH_TOKEN" ]; then
