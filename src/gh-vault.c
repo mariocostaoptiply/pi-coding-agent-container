@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -33,8 +34,10 @@ int main(int argc, char **argv) {
         closedir(d);
     }
 
-    setreuid(uid, uid);
-    setregid(gid, gid);
+    // Fully purge privilege boundaries (Real, Effective, Saved)
+    // Failure to clear saved-UID triggers bash restricted modes which strip environment vars.
+    if (setresgid(gid, gid, gid) != 0) return 1;
+    if (setresuid(uid, uid, uid) != 0) return 1;
 
     argv[0] = "/usr/local/bin/gh-guard";
     execv("/usr/local/bin/gh-guard", argv);

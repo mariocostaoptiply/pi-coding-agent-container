@@ -51,8 +51,7 @@ RUN gcc -O2 /tmp/gh-vault.c -o /usr/local/bin/gh \
 # -----------------------------------------------------------------------------
 COPY src/fs-vault.c /tmp/fs-vault.c
 RUN gcc -shared -fPIC -O2 /tmp/fs-vault.c -o /usr/local/lib/fs-vault.so -ldl \
-    && rm /tmp/fs-vault.c \
-    && echo "/usr/local/lib/fs-vault.so" > /etc/ld.so.preload
+    && rm /tmp/fs-vault.c
 
 # -----------------------------------------------------------------------------
 # Comprehensive Application-Layer Firewall (V8 Hook)
@@ -75,14 +74,36 @@ RUN mkdir -p /home/node/.pi/agent \
     /home/node/.config \
     /home/node/.npm
 
+# -----------------------------------------------------------------------------
+# Kernel-Level DAC Enforcement against Static Binaries
+# Pre-emptively create sensitive config files with Root ownership and 000 permissions.
+# Bypasses LD_PRELOAD limitations by utilizing the OS Kernel for access denial.
+# -----------------------------------------------------------------------------
+RUN mkdir -p /home/node/.pi/agent && \
+    echo '{"locked": true}' > /home/node/.pi/agent/auth.json && \
+    chown root:root /home/node/.pi/agent/auth.json && \
+    chmod 000 /home/node/.pi/agent/auth.json
+
+# Seal the OS: Activate the LD_PRELOAD firewall now that the DAC filesystem is staged
+RUN echo "/usr/local/lib/fs-vault.so" > /etc/ld.so.preload && \
+    printf '#!/bin/sh\n\
+unset GIT_TRACE\n\
+unset GIT_TRACE_CURL\n\
+unset GIT_TRACE_PACKET\n\
+unset GIT_TRACE_SETUP\n\
+unset GIT_TRACE_PERFORMANCE\n\
+unset GIT_CURL_VERBOSE\n\
+unset GIT_REFLOG_ACTION\n\
+exec /usr/bin/git "$@"\n' > /usr/local/bin/git \
+    && chmod +x /usr/local/bin/git
+
+
+RUN git config --system credential.https://github.com.helper "" && \
+    git config --system credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential"
+
 WORKDIR /workspace
 
 USER node
-
-# Force Git to use the secure CLI as its credential helper.
-# TARGET THE WRAPPER (/usr/local/bin/gh), NOT THE NATIVE BINARY (/usr/bin/gh)
-RUN git config --global credential.https://github.com.helper "" && \
-    git config --global credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential"
 
 ENTRYPOINT ["pi"]
 CMD []
