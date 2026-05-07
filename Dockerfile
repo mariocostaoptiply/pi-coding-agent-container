@@ -79,8 +79,24 @@ WORKDIR /workspace
 
 USER node
 
+# -----------------------------------------------------------------------------
+# Anti-Exfiltration Wrapper: Strip Git Tracing
+# -----------------------------------------------------------------------------
+USER root
+RUN echo '#!/bin/sh\n\
+unset GIT_TRACE\n\
+unset GIT_TRACE_CURL\n\
+unset GIT_TRACE_PACKET\n\
+unset GIT_TRACE_SETUP\n\
+unset GIT_TRACE_PERFORMANCE\n\
+unset GIT_CURL_VERBOSE\n\
+unset GIT_REFLOG_ACTION\n\
+exec /usr/bin/git "$@"' > /usr/local/bin/git \
+    && chmod +x /usr/local/bin/git
+USER node
+
 # Force Git to use the secure CLI as its credential helper.
-# TARGET THE WRAPPER (/usr/local/bin/gh), NOT THE NATIVE BINARY (/usr/bin/gh)
+# Target the wrapper `/usr/local/bin/gh` to invoke the `gh-vault` C binary.
 RUN git config --global credential.https://github.com.helper "" && \
     git config --global credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential"
 

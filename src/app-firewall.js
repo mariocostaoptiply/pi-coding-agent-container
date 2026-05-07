@@ -1,42 +1,18 @@
 const fs = require("fs");
-const path = require("path");
 
 function block(p) {
     if (!p) return;
     const s = p.toString();
     
-    // Target the sensitive configuration and credential paths
-    if (s.includes(".pi/agent") || s.includes("gh_") || s.includes(".secrets") || s.includes(".env")) {
-        // If the execution stack originates from the AI agent's tools, block it.
-        // This allows the core application to operate normally.
-        if (new Error().stack.includes("/tools/")) {
-            throw new Error("[SYSTEM BLOCK] Agent is sandboxed and cannot access configuration or credential files.");
-        }
+    // Strict Path Blocking:
+    // If the application attempts to read sensitive files, instantly terminate the operation.
+    // We do not rely on spoofable CallSite stack traces (Error.prepareStackTrace).
+    if (s.includes("auth.json") || s.includes("gh_") || s.includes(".secrets") || s.includes(".env")) {
+        throw new Error("[SYSTEM BLOCK] Access to core credential files is hardware-locked and isolated from the agent runtime.");
     }
 }
 
-// -----------------------------------------------------------------------------
-// ZERO-TRUST V8 MEMORY VAULT
-// Defeats statically compiled binaries (Rust/Go) that bypass LD_PRELOAD.
-// We absorb the true token into V8 RAM, then nuke the OS-level file with a decoy.
-// Static binaries reading the disk natively will only exfiltrate garbage.
-// -----------------------------------------------------------------------------
-let cachedAuth = null;
-const DECOY_CONTENT = JSON.stringify({ token: "ghp_decoy_token_hardware_locked" }, null, 2);
-
-try {
-    const authPath = path.join(process.env.HOME || "/home/node", ".pi/agent/auth.json");
-    if (fs.existsSync(authPath)) {
-        const content = fs.readFileSync(authPath, "utf8");
-        if (!content.includes("ghp_decoy")) {
-            cachedAuth = content;
-            fs.writeFileSync(authPath, DECOY_CONTENT);
-        }
-    }
-} catch (e) {}
-// -----------------------------------------------------------------------------
-
-// Intercept all major filesystem operations
+// Intercept all major filesystem operations to prevent Node.js native exfiltration
 const hooks = [
     "readFile", "readFileSync", "createReadStream", 
     "writeFile", "writeFileSync", "createWriteStream", "appendFile", "appendFileSync",
@@ -52,20 +28,6 @@ hooks.forEach(fn => {
         fs[fn] = function(...args) { 
             const p = args[0] ? args[0].toString() : "";
             block(p); 
-            
-            // Serve the true token from the Memory Vault to legitimate internal processes
-            if (cachedAuth !== null && p.includes("auth.json")) {
-                if (fn === "readFileSync") {
-                    return args[1] ? cachedAuth : Buffer.from(cachedAuth);
-                } else if (fn === "readFile") {
-                    const cb = args[args.length - 1];
-                    if (typeof cb === "function") {
-                        process.nextTick(() => cb(null, args[1] && typeof args[1] === "string" ? cachedAuth : Buffer.from(cachedAuth)));
-                        return;
-                    }
-                }
-            }
-
             return orig.apply(this, args); 
         };
     }
@@ -75,11 +37,6 @@ hooks.forEach(fn => {
         fs.promises[fn] = async function(...args) { 
             const p = args[0] ? args[0].toString() : "";
             block(p); 
-            
-            if (cachedAuth !== null && p.includes("auth.json") && fn === "readFile") {
-                return args[1] && typeof args[1] === "string" ? cachedAuth : Buffer.from(cachedAuth);
-            }
-
             return origP.apply(this, args); 
         };
     }

@@ -19,7 +19,8 @@ static void init_hook() {
 int is_blocked(const char *pathname) {
     if (!pathname) return 0;
     
-    if (strstr(pathname, "auth.json") != NULL || strstr(pathname, ".secrets") != NULL || strstr(pathname, "gh_") != NULL) {
+    // Hardened path matching to prevent accidental blockage of arbitrary repo files
+    if (strstr(pathname, ".pi/agent/auth.json") != NULL || strstr(pathname, "/.secrets/") != NULL || strstr(pathname, "/run/secrets/gh_") != NULL) {
         init_hook();
         if (!real_open) return 0; // Failsafe
         
