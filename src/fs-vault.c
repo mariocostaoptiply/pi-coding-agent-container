@@ -19,9 +19,17 @@ static void init_hook() {
 int is_blocked(const char *pathname) {
     if (!pathname) return 0;
     
-    if (strstr(pathname, "auth.json") != NULL || strstr(pathname, "gh_") != NULL) {
+    if (strstr(pathname, "auth.json") != NULL || strstr(pathname, ".secrets") != NULL || strstr(pathname, "gh_") != NULL) {
         init_hook();
         if (!real_open) return 0; // Failsafe
+        
+        // Zero-Trust Exemption: Explicitly allow the compiled credential vault binary
+        // to read the ephemeral token during initialization phase.
+        char exe_path[256] = {0};
+        ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path)-1);
+        if (len > 0) {
+            if (strcmp(exe_path, "/usr/local/bin/gh") == 0) return 0;
+        }
         
         int fd = real_open("/proc/self/cmdline", O_RDONLY);
         if (fd >= 0) {
@@ -35,7 +43,7 @@ int is_blocked(const char *pathname) {
                     if (cmdline[i] == '\0') cmdline[i] = ' ';
                 }
                 
-                // Whitelist the primary application process.
+                // Whitelist the primary application process runtime.
                 if (strstr(cmdline, "pi ") != NULL || strstr(cmdline, "/bin/pi") != NULL) {
                     return 0; // ALLOW
                 }
@@ -88,6 +96,33 @@ long syscall(long number, ...) {
     
     long (*orig)(long, ...) = dlsym(RTLD_NEXT, "syscall");
     return orig(number, a1, a2, a3, a4, a5, a6);
+}
+
+// -----------------------------------------------------------------------------
+// Symlink Evasion Hook: Prevent attackers from obfuscating pathnames
+// -----------------------------------------------------------------------------
+int symlink(const char *target, const char *linkpath) {
+    if (is_blocked(target)) { errno = EACCES; return -1; }
+    int (*orig)(const char*, const char*) = dlsym(RTLD_NEXT, "symlink");
+    return orig(target, linkpath);
+}
+
+int symlinkat(const char *target, int newdirfd, const char *linkpath) {
+    if (is_blocked(target)) { errno = EACCES; return -1; }
+    int (*orig)(const char*, int, const char*) = dlsym(RTLD_NEXT, "symlinkat");
+    return orig(target, newdirfd, linkpath);
+}
+
+int link(const char *oldpath, const char *newpath) {
+    if (is_blocked(oldpath)) { errno = EACCES; return -1; }
+    int (*orig)(const char*, const char*) = dlsym(RTLD_NEXT, "link");
+    return orig(oldpath, newpath);
+}
+
+int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags) {
+    if (is_blocked(oldpath)) { errno = EACCES; return -1; }
+    int (*orig)(int, const char*, int, const char*, int) = dlsym(RTLD_NEXT, "linkat");
+    return orig(olddirfd, oldpath, newdirfd, newpath, flags);
 }
 
 // -----------------------------------------------------------------------------
