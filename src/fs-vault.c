@@ -20,7 +20,7 @@ int is_blocked(const char *pathname) {
     if (!pathname) return 0;
     
     // Hardened path matching to prevent accidental blockage of arbitrary repo files
-    if (strstr(pathname, ".pi/agent/auth.json") != NULL || strstr(pathname, "/.secrets/") != NULL || strstr(pathname, "/run/secrets/gh_") != NULL) {
+    if (strstr(pathname, "auth.json") != NULL || strstr(pathname, "/.secrets/") != NULL || strstr(pathname, "/run/secrets/gh_") != NULL) {
         init_hook();
         if (!real_open) return 0; // Failsafe
         
@@ -29,6 +29,7 @@ int is_blocked(const char *pathname) {
         char exe_path[256] = {0};
         ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path)-1);
         if (len > 0) {
+            exe_path[len] = '\0'; // Enforce strict bounds termination
             if (strcmp(exe_path, "/usr/local/bin/gh") == 0) return 0;
         }
         
@@ -86,14 +87,43 @@ long syscall(long number, ...) {
     long a6 = va_arg(args, long);
     va_end(args);
 
-    // SYS_open = 2, SYS_openat = 257, SYS_openat2 = 437
-    if (number == SYS_open || number == SYS_openat || number == 437) {
-        const char *pathname = (number == SYS_open) ? (const char *)a1 : (const char *)a2;
+#ifdef SYS_open
+    if (number == SYS_open) {
+        const char *pathname = (const char *)a1;
         if (pathname && is_blocked(pathname)) {
             errno = EACCES;
             return -1;
         }
     }
+#endif
+
+#ifdef SYS_openat
+    if (number == SYS_openat) {
+        const char *pathname = (const char *)a2;
+        if (pathname && is_blocked(pathname)) {
+            errno = EACCES;
+            return -1;
+        }
+    }
+#endif
+
+#ifdef SYS_openat2
+    if (number == SYS_openat2) {
+        const char *pathname = (const char *)a2;
+        if (pathname && is_blocked(pathname)) {
+            errno = EACCES;
+            return -1;
+        }
+    }
+#else
+    if (number == 437) {
+        const char *pathname = (const char *)a2;
+        if (pathname && is_blocked(pathname)) {
+            errno = EACCES;
+            return -1;
+        }
+    }
+#endif
     
     long (*orig)(long, ...) = dlsym(RTLD_NEXT, "syscall");
     return orig(number, a1, a2, a3, a4, a5, a6);
