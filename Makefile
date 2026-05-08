@@ -14,7 +14,7 @@ setup:
 	touch .secrets/github_token.txt
 	chmod 600 .secrets/github_token.txt
 	@if [ -f .env ]; then grep "^GITHUB_TOKEN=" .env | cut -d '=' -f2- > .secrets/github_token.txt; fi
-	chmod 000 .secrets/github_token.txt
+	chmod 400 .secrets/github_token.txt
 
 build: setup
 	docker compose build
