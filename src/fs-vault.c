@@ -7,8 +7,12 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 static int (*real_open)(const char *, int, ...) = NULL;
+static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
 
 static void init_hook() {
     if (!real_open) {
@@ -239,4 +243,43 @@ int openat64(int dirfd, const char *pathname, int flags, ...) {
         return orig(dirfd, pathname, flags, mode);
     }
     return orig(dirfd, pathname, flags);
+}
+
+// -----------------------------------------------------------------------------
+// Network Syscall Hook (Transparent Proxychains Behavior)
+// Intercepts socket connections and dynamically routes them to zonzon
+// -----------------------------------------------------------------------------
+int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (!real_connect) {
+        real_connect = dlsym(RTLD_NEXT, "connect");
+    }
+
+    if (addr && addr->sa_family == AF_INET) {
+        struct sockaddr_in *sin = (struct sockaddr_in *)addr;
+        
+        // Define our zonzon Intercept Mesh IP
+        struct in_addr proxy_addr;
+        inet_pton(AF_INET, "172.53.0.53", &proxy_addr);
+        
+        // Ignore loopback (127.0.0.1) and traffic already heading to zonzon
+        if (sin->sin_addr.s_addr != proxy_addr.s_addr && 
+            sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK)) {
+            
+            struct sockaddr_in proxy_sockaddr = *sin;
+            proxy_sockaddr.sin_addr = proxy_addr;
+            
+            // Route HTTPS (443) to zonzon's SNI Proxy, route everything else to HTTP (80)
+            if (sin->sin_port == htons(443)) {
+                proxy_sockaddr.sin_port = htons(443);
+            } else {
+                proxy_sockaddr.sin_port = htons(80);
+            }
+
+            // Execute the connection with the hijacked destination
+            return real_connect(sockfd, (struct sockaddr *)&proxy_sockaddr, addrlen);
+        }
+    }
+
+    // Pass-through for IPv6, Local sockets, or exempted traffic
+    return real_connect(sockfd, addr, addrlen);
 }

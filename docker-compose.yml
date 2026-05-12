@@ -1,4 +1,24 @@
 services:
+  zonzon:
+    build:
+      context: .
+      dockerfile: Dockerfile.zonzon
+    container_name: zonzon_mesh
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "58080:80/tcp"
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ZONZON_PORT=53
+      - ZONZON_FALLBACK_DNS=1.1.1.1
+    networks:
+      pi_network:
+        ipv4_address: 172.53.0.53
+      external_net:
+    restart: unless-stopped
+
   pi-agent:
     build:
       context: .
@@ -8,6 +28,10 @@ services:
     
     tty: true
     stdin_open: true
+
+    # Force all domain resolution through zonzon's L7 Intercept Mesh
+    dns:
+      - 172.53.0.53
 
     environment:
       - HOME=/home/node
@@ -32,7 +56,6 @@ services:
       - pi_data:/home/node/.pi
       
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-
     read_only: true
 
     tmpfs:
@@ -46,6 +69,8 @@ services:
       - pi_network
 
     restart: "no"
+    depends_on:
+      - zonzon
 
 volumes:
   pi_data:
@@ -64,6 +89,12 @@ volumes:
 
 networks:
   pi_network:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.53.0.0/16
+  external_net:
     driver: bridge
 
 secrets:

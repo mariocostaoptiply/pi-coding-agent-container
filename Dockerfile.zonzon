@@ -1,0 +1,11 @@
+FROM node:24-alpine
+
+WORKDIR /app
+
+RUN npm install -g zonzon
+
+RUN addgroup -S zonzon && adduser -S zonzon -G zonzon
+USER zonzon
+
+ENTRYPOINT ["zonzon"]
+CMD ["start", "--config", "/app/config/hosts.json", "--port", "53"]
