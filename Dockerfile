@@ -95,5 +95,4 @@ WORKDIR /workspace
 
 USER node
 
-ENTRYPOINT ["pi"]
-CMD []
+CMD ["pi"]

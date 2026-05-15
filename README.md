@@ -16,6 +16,17 @@ Compiles the image from source and strips OS privilege escalation binaries.
 make build
 ```
 
+**Hotdog build**
+Builds the image tag expected by Hotdog Ticket Assistants.
+```bash
+make hotdog-build
+```
+This produces:
+```txt
+hotdog-ticket-assistant:local
+```
+Hotdog starts per-ticket containers itself with host-provided workspace, agent-run, and wrapper mounts. This repo only provides the hardened image and optional zonzon gateway.
+
 **3. Run**
 Starts the agent in interactive TUI mode.
 ```bash

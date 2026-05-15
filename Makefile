@@ -1,7 +1,8 @@
-.PHONY: build run clean shell setup
+.PHONY: build hotdog-build test run clean shell setup
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
+HOTDOG_IMAGE ?= hotdog-ticket-assistant:local
 
 export PARANOID_MODE ?= true
 RANDOM_ID := $(shell openssl rand -hex 6 2>/dev/null || echo "default")
@@ -19,8 +20,14 @@ setup:
 build: setup
 	docker compose build
 
+hotdog-build: setup
+	HOTDOG_IMAGE=$(HOTDOG_IMAGE) docker compose build pi-agent
+
 update: setup
 	docker compose build --no-cache
+
+test:
+	./tests/hotdog-adapter.test.sh
 
 run: setup
 	HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose run --rm pi-agent
