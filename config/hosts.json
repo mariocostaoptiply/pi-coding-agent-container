@@ -16,7 +16,14 @@
       "*.github.com",
       "github.com",
       "*.githubusercontent.com",
-      "pi.dev"
+      "pi.dev",
+      "registry.npmjs.org",
+      "*.npmjs.org",
+      "api.minimax.io",
+      "api.openai.com",
+      "api.anthropic.com",
+      "generativelanguage.googleapis.com",
+      "openrouter.ai"
     ],
     "allowlist_ips": [
       "127.0.0.1",

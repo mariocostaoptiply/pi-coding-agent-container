@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.zonzon
-    container_name: zonzon_mesh
+    container_name: hotdog_agent_gateway
     cap_add:
       - NET_ADMIN
     ports:
@@ -90,6 +90,7 @@ volumes:
 
 networks:
   pi_network:
+    name: hotdog_agent_gateway
     driver: bridge
     internal: true
     ipam:

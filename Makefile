@@ -1,4 +1,4 @@
-.PHONY: build hotdog-build test run clean shell setup
+.PHONY: build hotdog-build hotdog-gateway-up hotdog-gateway-down hotdog-gateway-status test run clean shell setup
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
@@ -22,6 +22,15 @@ build: setup
 
 hotdog-build: setup
 	HOTDOG_IMAGE=$(HOTDOG_IMAGE) docker compose build pi-agent
+
+hotdog-gateway-up: setup
+	docker compose up -d zonzon
+
+hotdog-gateway-down:
+	docker compose stop zonzon
+
+hotdog-gateway-status:
+	@node scripts/hotdog-gateway-status.js
 
 update: setup
 	docker compose build --no-cache

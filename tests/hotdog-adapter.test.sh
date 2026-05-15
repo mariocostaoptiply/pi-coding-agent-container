@@ -43,4 +43,31 @@ grep -q 'hotdog-ticket-assistant:local' README.md || \
 grep -q 'make hotdog-build' README.md || \
   fail "README should document the Hotdog build command"
 
-echo "ok - hotdog image, command override, vault defaults, and docs are configured"
+for target in hotdog-gateway-up hotdog-gateway-down hotdog-gateway-status; do
+  make -n "$target" >/tmp/$target.dryrun 2>/tmp/$target.err || {
+    cat /tmp/$target.err >&2
+    fail "make $target should exist and dry-run successfully"
+  }
+done
+
+grep -q 'name: hotdog_agent_gateway' docker-compose.yml || \
+  fail "gateway network should use stable hotdog_agent_gateway name"
+
+grep -q 'api.minimax.io' config/hosts.json || fail "gateway should allow MiniMax"
+grep -q 'openrouter.ai' config/hosts.json || fail "gateway should allow OpenRouter"
+grep -q 'registry.npmjs.org' config/hosts.json || fail "gateway should allow npm registry"
+
+status_json="$(MAKEFLAGS= make hotdog-gateway-status 2>/tmp/gateway-status.err)" || {
+  cat /tmp/gateway-status.err >&2
+  fail "make hotdog-gateway-status should run"
+}
+node -e '
+const status = JSON.parse(process.argv[1]);
+for (const key of ["running", "containerName", "network", "dnsIp", "controlPlaneUrl"]) {
+  if (!(key in status)) throw new Error(`missing ${key}`);
+}
+if (status.network !== "hotdog_agent_gateway") throw new Error("wrong network");
+if (status.dnsIp !== "172.53.0.53") throw new Error("wrong dns");
+' "$status_json" || fail "gateway status should be valid JSON contract"
+
+echo "ok - hotdog image, gateway, command override, vault defaults, and docs are configured"
